@@ -1,0 +1,16 @@
+services:
+  # Backend FastAPI Docker Web Service
+  - type: web
+    name: spend-analyzer-backend
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: backend
+    plan: free
+    region: oregon
+    envVars:
+      - key: PORT
+        value: 8000
+      - key: OCR_ENABLED
+        value: "true"
+      - key: TESSERACT_CMD
+        value: tesseract
