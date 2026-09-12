@@ -1,0 +1,25 @@
+[build]
+  base = "frontend"
+  publish = "build/web"
+  command = """
+    if [ ! -d "/opt/build/cache/flutter" ]; then
+      echo "Downloading Flutter SDK..."
+      git clone https://github.com/flutter/flutter.git --depth 1 -b stable /opt/build/cache/flutter
+    fi
+    export PATH="$PATH:/opt/build/cache/flutter/bin"
+    flutter doctor -v
+    flutter config --enable-web
+    flutter pub get
+    flutter build web --release --dart-define=BACKEND_URL=https://spend-analyzer-ghj9.onrender.com
+  """
+
+[[redirects]]
+  from = "/api/*"
+  to = "https://spend-analyzer-ghj9.onrender.com/:splat"
+  status = 200
+  force = true
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
