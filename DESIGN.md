@@ -2,15 +2,18 @@
 
 ## 1. Overview
 
-A cross-platform application that parses bank/credit card PDF statements, categorizes transactions into **mandatory** vs **discretionary** spending, and provides actionable saving insights.
+A cross-platform personal finance intelligence system that parses bank and credit card PDF statements, categorizes transactions into **mandatory** vs **discretionary** spending, detects EMIs and recurring subscriptions, provides automated savings recommendations, and supports multi-user persistent accounts, ephemeral incognito sessions, and demo data exploration.
 
 | Property | Value |
-|----------|-------|
-| **Backend** | Python 3.12 + FastAPI + SQLAlchemy (async) + SQLite |
-| **Frontend** | Flutter 3.5+ (Material 3) with Provider state management |
-| **OCR** | Tesseract 5.3.4 + pypdfium2 |
-| **Parsers** | 11 bank parsers (10 specific + 1 generic fallback) |
-| **Status** | 311 transactions parsed, 0% uncategorized |
+|---|---|
+| **Backend** | Python 3.12 + FastAPI + SQLAlchemy 2.0 (Async) + SQLite / PostgreSQL |
+| **Frontend** | Flutter 3.x (Web, Android, iOS, Desktop) + Material 3 + Provider state management |
+| **OCR Engine** | Tesseract OCR 5.3.4 + pypdfium2 (high-res rendering + fallback binarization) |
+| **Parsers** | 11 bank parsers (10 bank-specific + 1 generic heuristic fallback) |
+| **Authentication** | PBKDF2-HMAC-SHA256 (100,000 rounds) password hashing + HMAC-SHA256 JWT Tokens |
+| **Privacy Modes** | Strict multi-tenant isolation, Transient/Incognito session mode, Sample Demo mode |
+| **Uploads** | Single and multi-file batch PDF uploads with per-file status reports |
+| **Deployment** | Docker on Render (`https://spend-analyzer-ghj9.onrender.com`) + Netlify (`https://spend-analyzer.arkaseth.com`) |
 
 ---
 
@@ -18,36 +21,38 @@ A cross-platform application that parses bank/credit card PDF statements, catego
 
 ```
 spendAnalyzer/
-├── DESIGN.md                       # This document
-├── PLAN.md                         # Original architecture plan
+├── DESIGN.md                       # System design, architecture & runbook
+├── README.md                       # Project overview & quickstart
+├── render.yaml                     # Render cloud deployment blueprint
+├── netlify.toml                    # Netlify Flutter build & SPA redirect pipeline
+├── .github/workflows/
+│   └── ci_cd.yml                   # Automated Pytest suite + Flutter Web compilation
 ├── backend/
-│   ├── requirements.txt            # Python dependencies
-│   ├── spend_analyzer.db           # SQLite database (auto-created)
-│   ├── local_tesseract/            # Bundled Tesseract 5.3.4
-│   │   ├── bin/tesseract           # Tesseract binary
-│   │   ├── lib/                    # Shared libraries (liblept, libtesseract)
-│   │   └── tessdata/
-│   │       └── eng.traineddata     # English language data
-│   ├── venv/                       # Python virtual environment
-│   ├── tests/                      # Test directory
-│   │   └── __init__.py
+│   ├── Dockerfile                  # Production container with Tesseract OCR pre-installed
+│   ├── requirements.txt            # Python dependencies (FastAPI, SQLAlchemy, pdfplumber, httpx)
+│   ├── pytest.ini                  # Pytest async configuration
+│   ├── tests/                      # Automated test suite (22 tests)
+│   │   ├── test_api.py             # Endpoint lifecycle & batch upload tests
+│   │   ├── test_auth.py            # User registration, login, demo seeding, transient cleanup
+│   │   ├── test_classifier.py      # Classification engine & rule ordering tests
+│   │   └── test_parsers.py         # Bank-specific parser regex & extraction tests
 │   └── app/
-│       ├── __init__.py
-│       ├── main.py                 # FastAPI entry point, CORS, router registration
-│       ├── config.py               # Environment-based configuration
-│       ├── database.py             # SQLAlchemy async engine + session
-│       ├── models/
-│       │   ├── __init__.py
-│       │   ├── transaction.py      # Transaction ORM model (29 fields)
-│       │   └── category.py         # CategoryRule ORM model (for user-defined rules)
-│       ├── schemas/
-│       │   ├── __init__.py
-│       │   └── transaction.py      # Pydantic schemas (request/response validation)
-│       ├── parsers/
-│       │   ├── __init__.py         # Imports all parser modules
-│       │   ├── base.py             # Abstract BaseParser class
-│       │   ├── registry.py         # Parser registry (register/get/detect)
-│       │   ├── generic.py          # Fallback heuristic parser
+│       ├── main.py                 # FastAPI application, CORS middleware, router aggregation
+│       ├── database.py             # Async database connection & non-destructive SQLite PRAGMA migrations
+│       ├── config.py               # Environment configuration
+│       ├── models/                 # SQLAlchemy ORM models
+│       │   ├── user.py             # User account model (PBKDF2 hash, salt, email index)
+│       │   ├── transaction.py      # Transaction model (user_id, session_id, is_transient, txn_hash)
+│       │   └── category.py         # CategoryRule model
+│       ├── schemas/                # Pydantic schemas (requests, responses, filters)
+│       │   └── transaction.py
+│       ├── services/               # Core business services
+│       │   ├── auth.py             # Password hashing, JWT token lifecycle, SessionContext dependency
+│       │   └── demo_data.py        # 35-transaction realistic sample generator across 3 months
+│       ├── parsers/                # Statement parsers
+│       │   ├── base.py             # BaseParser interface
+│       │   ├── registry.py         # Detection and parser registry
+│       │   ├── generic.py          # Universal heuristic fallback
 │       │   ├── sbi_bank.py         # SBI Savings parser
 │       │   ├── sbi_cashback.py     # SBI Cashback CC parser
 │       │   ├── icici_amazon.py     # ICICI Amazon Pay CC parser
@@ -63,7 +68,7 @@ spendAnalyzer/
 │       │   └── engine.py           # OCR pipeline (Tesseract + pypdfium2)
 │       ├── classifier/
 │       │   ├── __init__.py
-│       │   ├── rules.py            # Classification rules + income/fee rules
+│       │   ├── rules.py            # Ordered keyword matching rules
 │       │   └── engine.py           # ClassificationEngine wrapper
 │       ├── analyzer/
 │       │   ├── __init__.py
@@ -72,49 +77,33 @@ spendAnalyzer/
 │       │   └── insights.py         # Spending insights generation
 │       └── routers/
 │           ├── __init__.py
-│           ├── upload.py           # PDF upload + manual entry endpoints
-│           ├── transactions.py     # CRUD + filter + export endpoints
+│           ├── auth.py             # User accounts & session endpoints
+│           ├── upload.py           # Multi-file batch + single PDF upload
+│           ├── transactions.py     # CRUD + filter + CSV/JSON export
 │           └── analysis.py         # Analysis overview endpoint
-├── frontend/
-│   ├── pubspec.yaml                # Flutter dependencies
-│   ├── web/
-│   │   ├── index.html
-│   │   └── manifest.json
-│   ├── lib/
-│   │   ├── main.dart               # App entry, MultiProvider setup
-│   │   ├── app.dart                # MaterialApp, theme, navigation shell
-│   │   ├── services/
-│   │   │   └── api_service.dart    # HTTP client to backend
-│   │   ├── models/
-│   │   │   ├── transaction.dart    # Transaction model
-│   │   │   └── analysis.dart       # Analysis, MonthlyTrend, CategoryBreakdown, Insight, TransactionFilter
-│   │   ├── providers/
-│   │   │   ├── transaction_provider.dart  # Transaction state + CRUD
-│   │   │   └── analysis_provider.dart     # Analysis state + upload
-│   │   ├── screens/
-│   │   │   ├── dashboard_screen.dart      # Summary cards, pie chart, bar chart, insights
-│   │   │   ├── upload_screen.dart         # PDF upload + manual entry dialog
-│   │   │   ├── transactions_screen.dart   # Filterable transaction list
-│   │   │   └── insights_screen.dart       # Full insights + category breakdown
-│   │   └── widgets/
-│   │       ├── charts/             # (reserved for chart widgets)
-│   │       └── common/
-│   │           ├── empty_state.dart       # Empty state placeholder
-│   │           ├── transaction_tile.dart   # Transaction list card
-│   │           └── category_badge.dart    # Color-coded category chip
-│   └── test/                       # Flutter tests
-└── StatementsForProject/           # 11 sample PDFs for testing
-    ├── SBI Statement part 1_edit.pdf
-    ├── SBICashbackStatements.pdf
-    ├── ICICICreditCard.pdf
-    ├── YESBANKCREDIT_CARD_STATEMENT.pdf
-    ├── ZenithPlusStatementsJun24toMay25.pdf
-    ├── AMEXStatement.pdf
-    ├── HDFCSwiggyStatements.pdf
-    ├── HSBCStatement.pdf
-    ├── IDFCFIRSTBankstatement_10061758174_074233027.pdf
-    ├── IndusIndStatements.pdf
-    └── Acct Statement_XX0433_07092025.pdf
+└── frontend/
+    ├── pubspec.yaml                # Flutter dependencies
+    ├── web/
+    │   ├── index.html              # Web entry page
+    │   └── _redirects              # SPA routing & Netlify API proxy rules
+    ├── lib/
+    │   ├── main.dart               # MultiProvider setup
+    │   ├── app.dart                # MaterialApp shell & SessionBanner
+    │   ├── services/
+    │   │   └── api_service.dart    # HTTP client with JWT & session headers
+    │   ├── providers/
+    │   │   ├── auth_provider.dart  # User auth, incognito & demo state
+    │   │   ├── transaction_provider.dart
+    │   │   └── analysis_provider.dart
+    │   ├── screens/
+    │   │   ├── dashboard_screen.dart
+    │   │   ├── upload_screen.dart
+    │   │   ├── transactions_screen.dart
+    │   │   └── insights_screen.dart
+    │   └── widgets/
+    │       ├── auth/               # LoginDialog, SessionBanner, UserAccountButton
+    │       └── common/             # EmptyState, TransactionTile, CategoryBadge
+    └── test/                       # Flutter unit & widget tests
 ```
 
 ---
@@ -143,27 +132,41 @@ All settings are environment-variable overridable.
 
 ### 3.3 Models
 
+#### User (`app/models/user.py`)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | UUID (PK) | Unique user ID |
+| `email` | String(255) | Unique index, user login email |
+| `username` | String(100) | Display name |
+| `password_hash` | String(255) | PBKDF2-HMAC-SHA256 hash |
+| `salt` | String(64) | Cryptographic per-user random salt |
+| `is_active` | Boolean | Account status |
+| `created_at` | DateTime | Account creation timestamp |
+
 #### Transaction (`app/models/transaction.py`)
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | UUID (PK) | Auto-generated |
-| `bank_name` | String(100) | e.g., "SBI", "ICICI Amazon Pay" |
+| `id` | UUID (PK) | Auto-generated transaction ID |
+| `user_id` | UUID (FK) | ForeignKey to `users.id` (nullable for guest/transient sessions) |
+| `is_transient` | Boolean | `True` for ephemeral/incognito session records (purged on exit) |
+| `session_id` | String(100) | Ephemeral session token for incognito and demo data scoping |
+| `txn_hash` | String(64) | SHA-256 hash `(bank|date|amt|desc|type)` for duplicate detection |
+| `bank_name` | String(100) | e.g., "SBI", "ICICI Amazon Pay", "HDFC Swiggy" |
 | `account_type` | String(50) | "savings", "credit_card" |
-| `source` | String(50) | "pdf_upload", "manual", "sms" |
-| `transaction_date` | Date | Transaction date |
+| `source` | String(50) | "pdf_upload", "manual", "demo" |
+| `transaction_date` | Date | ISO transaction date |
 | `description` | Text | Raw merchant/narration text |
 | `amount` | Decimal(12,2) | Always positive |
 | `type` | String(10) | "debit" or "credit" |
-| `category` | String(100) | "Groceries", "Dining", etc. |
+| `category` | String(100) | "Groceries", "Dining", "Travel", "Gaming", etc. |
 | `classification` | String(50) | "mandatory", "discretionary", "income", "uncategorized" |
-| `merchant_category` | String(200) | From YES BANK-style statements |
-| `is_emi` | Boolean | Part of an EMI plan |
-| `is_recurring` | Boolean | Subscription/standing instruction |
-| `tags` | Text | User-added tags (comma-separated) |
-| `raw_data` | Text | Original row for debugging |
-| `created_at` | DateTime | Auto-set on creation |
+| `merchant_category` | String(200) | Statement-provided category |
+| `is_emi` | Boolean | Part of an EMI repayment plan |
+| `is_recurring` | Boolean | Recurring subscription or bill |
 | `statement_file` | String(500) | Source PDF filename |
+| `created_at` | DateTime | Auto-set on creation |
 
 #### CategoryRule (`app/models/category.py`)
 
@@ -314,15 +317,15 @@ CLASSIFICATION_RULES = {
 
 #### Classification Priority Order
 
-1. **Income detection** — If any INCOME_RULES keyword matches → `("Income", "income")`
-2. **Merchant category match** — If `merchant_category` field exists, check it first
-3. **Keyword match** — Check description against CLASSIFICATION_RULES keywords
-4. **Fee detection** — Check FEE_RULES keywords → `("Fees & Charges", "mandatory")`
+1. **Fee detection** — Check FEE_RULES keywords (e.g., `ANNUAL MEMBERSHIP FEE`, `LATE FEE`, `SURCHARGE`) first → `("Fees & Charges", "mandatory")`. Ensures fee items aren't misattributed to subscriptions.
+2. **Income detection** — If any INCOME_RULES keyword matches → `("Income", "income")`
+3. **Merchant category match** — If `merchant_category` field exists, check it first
+4. **Keyword match** — Check description against CLASSIFICATION_RULES keywords (Housing, Groceries, Utilities, Dining, Gaming, Lounge, Transport, Travel, etc.)
 5. **UPI catch-all** — If `UPI/`, `UPI_`, or `UPI-` in description → `("UPI", "uncategorized")`
 6. **POS catch-all** — If `POS-` or ` POS ` in description → `("POS", "uncategorized")`
-7. **Transfer catch-all** — If `TRANSFERTO`, `IMPS/`, `NEFT/` → `("Transfer", "uncategorized")`
-8. **Empty description** → `("Fees & Charges", "mandatory")`
-9. **Fallback** → `("Uncategorized", "uncategorized")`
+7. **Transfer catch-all** — If `TRANSFERTO`, `DEBIT-TRANSFER`, `IMPS/`, `NEFT/` → `("Transfer", "uncategorized")`
+8. **Empty description** — `("Fees & Charges", "mandatory")`
+9. **Fallback** — `("Uncategorized", "uncategorized")`
 
 #### Engine (`app/classifier/engine.py`)
 
@@ -361,22 +364,30 @@ Generates 4 insight types:
 
 ### 3.9 API Endpoints
 
-| Method | Path | Description | Request | Response |
-|--------|------|-------------|---------|----------|
-| `GET` | `/` | Health check | — | `{"message": "Spend Analyzer API", "docs": "/docs"}` |
-| `POST` | `/upload/pdf` | Upload PDF statement | `multipart/form-data` with `file` (max 50MB) | `{"message", "count", "bank"}` |
-| `POST` | `/upload/manual` | Add manual transaction | JSON body matching `ManualTransactionCreate` | `{"message", "id"}` |
-| `GET` | `/upload/banks` | List supported banks | — | `{"banks": [...]}` |
-| `GET` | `/transactions/` | List/filter transactions | Query params: `bank_name`, `category`, `classification`, `type`, `start_date`, `end_date`, `search`, `min_amount`, `max_amount`, `limit` (≤500), `offset` | `{"total", "offset", "limit", "transactions": [...]}` |
-| `PATCH` | `/transactions/{id}` | Update transaction | JSON body matching `TransactionUpdate` | `{"message": "Transaction updated"}` |
-| `DELETE` | `/transactions/{id}` | Delete transaction | — | `{"message": "Transaction deleted"}` |
-| `POST` | `/transactions/reclassify` | Re-run classification on all | — | `{"message": "Reclassified N transactions"}` |
-| `GET` | `/transactions/descriptions` | Autocomplete descriptions | Query: `q` (search), `limit` (≤50) | `{"descriptions": [...]}` |
-| `GET` | `/transactions/export/csv` | Download CSV | — | CSV file download |
-| `GET` | `/transactions/export/json` | Download JSON | — | JSON file download |
-| `GET` | `/transactions/categories` | List all known categories | — | `{"categories": [...]}` |
-| `GET` | `/transactions/banks` | List banks in DB | — | `{"banks": [...]}` |
-| `GET` | `/analysis/overview` | Full analysis | — | `AnalysisResponse` JSON |
+| Method | Path | Description | Headers / Auth | Request | Response |
+|---|---|---|---|---|---|
+| `GET` | `/` | Health check & API docs link | — | — | `{"message": "Spend Analyzer API", "docs": "/docs"}` |
+| `POST` | `/auth/register` | Create user account | — | JSON `{email, username, password}` | `{"token", "user"}` |
+| `POST` | `/auth/login` | Login user | — | JSON `{email, password}` | `{"token", "user"}` |
+| `GET` | `/auth/me` | Current authenticated user | `Bearer <token>` | — | `{"id", "email", "username"}` |
+| `POST` | `/auth/seed-demo` | Seed 35 realistic demo txns | `X-Session-ID` / `Bearer` | — | `{"message", "count": 35}` |
+| `POST` | `/auth/clear-demo` | Clear sample demo data | `X-Session-ID` / `Bearer` | — | `{"message": "Demo data cleared"}` |
+| `POST` | `/auth/transient/clear`| Purge incognito session data | `X-Session-ID` | — | `{"message", "deleted": true}` |
+| `POST` | `/upload/pdf` | Upload single statement | `Bearer` / `Session` | `multipart/form-data` with `file` | `{"message", "count", "bank", "results"}` |
+| `POST` | `/upload/batch` | Upload multiple statements | `Bearer` / `Session` | `multipart/form-data` with `files` | `{"total_files", "successful_files", "results": [...]}` |
+| `POST` | `/upload/manual` | Add manual transaction | `Bearer` / `Session` | JSON `ManualTransactionCreate` | `{"message", "id"}` |
+| `POST` | `/upload/reset` | Clear user/session data | `Bearer` / `Session` | — | `{"message", "deleted": true}` |
+| `GET` | `/upload/banks` | List supported banks | — | — | `{"banks": [...]}` |
+| `GET` | `/transactions/` | List/filter transactions | `Bearer` / `Session` | Query filters (search, category, etc.) | `{"total", "transactions": [...]}` |
+| `PATCH` | `/transactions/{id}` | Update transaction | `Bearer` / `Session` | JSON `TransactionUpdate` | `{"message": "Transaction updated"}` |
+| `DELETE`| `/transactions/{id}` | Delete transaction | `Bearer` / `Session` | — | `{"message": "Transaction deleted"}` |
+| `POST` | `/transactions/reclassify` | Re-run classification rules | `Bearer` / `Session` | — | `{"message": "Reclassified N transactions"}` |
+| `GET` | `/transactions/descriptions` | Autocomplete descriptions | `Bearer` / `Session` | Query: `q`, `limit` | `{"descriptions": [...]}` |
+| `GET` | `/transactions/export/csv` | Download CSV export | `Bearer` / `Session` | — | CSV file stream |
+| `GET` | `/transactions/export/json` | Download JSON export | `Bearer` / `Session` | — | JSON file stream |
+| `GET` | `/transactions/categories` | List all known categories | — | — | `{"categories": [...]}` |
+| `GET` | `/transactions/banks` | List banks in DB | — | — | `{"banks": [...]}` |
+| `GET` | `/analysis/overview` | Overview analysis | `Bearer` / `Session` | — | `AnalysisResponse` JSON |
 
 ---
 
@@ -386,8 +397,9 @@ Generates 4 insight types:
 
 ```
 MultiProvider
-├── TransactionProvider    # Transaction list, pagination, filter state
-└── AnalysisProvider       # Analysis data, upload state, supported banks
+├── AuthProvider           # User profile, JWT token, Incognito mode, Demo mode state
+├── TransactionProvider    # Transaction list, pagination, search, category filter state
+└── AnalysisProvider       # Spend overview, charts, batch upload progress state
 ```
 
 ### 4.2 Navigation
@@ -740,13 +752,13 @@ flutter test
 | Category | Keywords |
 |----------|----------|
 | **Housing** | RENT, LEASE, MAINTENANCE, HDFC ERGO, PROPERTY |
-| **Groceries** | DMART, GROCERY, BIG BASKET, MILANO, SUPERMARKET, FRESH, INSTAMART |
-| **Utilities** | BBPS, ELECTRICITY, RECHARGE, BROADBAND, WATER, GAS, BILLPAY, RELIANCE |
+| **Groceries** | DMART, GROCERY, BIG BASKET, MILANO, SUPERMARKET, FRESH, INSTAMART, GROFERS, BLINKIT, ZEPTO |
+| **Utilities** | BBPS, ELECTRICITY, RECHARGE, BROADBAND, WATER, GAS, BILLPAY, RELIANCE, AIRTEL, JIO |
 | **Insurance** | INSURANCE, POLICY, HDFC ERGO, HDFCERGOGINS, LIC, HEALTH INSURANCE |
-| **EMI/Loans** | EMI, FLEXIPAY, ENCASH, LOAN, DEPOSITOR INV, PZCRE |
+| **EMI/Loans** | EMI, FLEXIPAY, ENCASH, LOAN, DEPOSITOR INV, PZCRE, LOAN REPAYMENT |
 | **Fuel** | PETROL, FUEL, BP, AYUSHMAN FUELS, INDIAN OIL, SHELL, HPCL |
 | **Medical** | MEDICAL, CLINIC, MED WORLD, DR SUHA, PHARMACY, APOLLO |
-| **Transport** | METRO, UBER, OLA, BUS, TRAIN, RAPIDO |
+| **Transport** | METRO, UBER, OLA, BUS, TRAIN, RAPIDO, YANDEX, FINNET, ONAY |
 | **Education** | COACHING, COURSE, TRAINING, RD COACHING, UNIVERSITY, SCHOOL |
 | **Investment** | ZERODHA, NACH/EIH, NACH/MAHINDRA, NACH/TPOWER, NACH/HINDUSTAN, NACH/TATAMOTOR, NACH/IHCL |
 | **Tax** | ITDTAX, INCOME TAX |
@@ -755,21 +767,23 @@ flutter test
 
 | Category | Keywords |
 |----------|----------|
-| **Dining** | ZOMATO, SWIGGY, RESTAURANT, MILANO ICE CREAM, DOMINOS, PIZZA, CAFE, EAZYDINER, HEDONNE |
+| **Dining** | ZOMATO, SWIGGY, RESTAURANT, MILANO ICE CREAM, DOMINOS, PIZZA, CAFE, EAZYDINER, HEDONNE, DISTRICT DINING, CORNER HOUSE, CORNER HOUSE ICE CREA |
 | **Entertainment** | SONYLIV, NETFLIX, HOTSTAR, SPOTIFY, PRIME VIDEO, YOUTUBE, OTT, GOOGLE PLAY, DISTRICT MOVIE |
+| **Gaming** | STEAM, STEAMGAMES, STEAM PURCHASE, PLAYSTATION, XBOX, RIOT, EPIC GAMES |
+| **Lounge** | DREAMFOLKS, 080 DOM, 080 INTL, ENCALM, AIRPORT LOUNGE |
 | **Shopping** | AMAZON, MYNTRA, URBANCLAP, HEADPHONE, FLIPKART, SHOP, E COMMERC |
-| **Travel** | CLEARTRIP, FLIGHT, HOTEL, MAKEMYTRIP, AIR, HOLIDAY, TRAVEL |
+| **Travel** | CLEARTRIP, FLIGHT, HOTEL, MAKEMYTRIP, AIR, HOLIDAY, TRAVEL, BUNGALOWS, BOOKING, PELAGO, GETYOURGUIDE |
 | **Fitness** | MUSCLE NECTAR, GYM, FITNESS, SUPPLEMENT |
 | **Personal Care** | BEAUTY, SALON, OH WOW BEAUTY, SPA, GROOMING |
 | **Subscriptions** | SPOTIFY SI, SONYLIV, NETFLIX, PRIME, MEMBERSHIP |
 
 ### Income Keywords
 
-CASHBACK, CASH BACK, REFUND, REVERSAL, WAIVER, PAYMENT RECEIVED, CREDITINTEREST, INTEREST, BBPS PAYMENT, TELE TRANSFER, NETBANKING TRANSFER, CC PAYMENT, TRANSFERFROM
+CASHBACK, CASH BACK, REFUND, REVERSAL, WAIVER, PAYMENT RECEIVED, CREDITINTEREST, INTEREST, BBPS PAYMENT, TELE TRANSFER, NETBANKING TRANSFER, CC PAYMENT, TRANSFERFROM, SALARY
 
-### Fee Keywords
+### Fee Keywords (Evaluated Before General Rules)
 
-MEMBERSHIP FEE, SURCHARGE, GST, IGST, FOREIGN CURRENCY MARKUP, LATE FEE, FUEL SURCHARGE, FUEL FEE, CHARGE:AMB
+ANNUAL MEMBERSHIP FEE, MEMBERSHIP FEE, SURCHARGE, GST, IGST, FOREIGN CURRENCY MARKUP, LATE FEE, FUEL SURCHARGE, FUEL FEE, CHARGE:AMB
 
 ### Catch-all Categories
 
@@ -777,7 +791,7 @@ MEMBERSHIP FEE, SURCHARGE, GST, IGST, FOREIGN CURRENCY MARKUP, LATE FEE, FUEL SU
 |---------|----------|---------------|
 | UPI/, UPI_, UPI- | UPI | uncategorized |
 | POS-, POS | POS | uncategorized |
-| TRANSFERTO, IMPS/, IMPS-, NEFT/ | Transfer | uncategorized |
+| TRANSFERTO, DEBIT-TRANSFER, IMPS/, IMPS-, NEFT/ | Transfer | uncategorized |
 | Empty description | Fees & Charges | mandatory |
 | No match | Uncategorized | uncategorized |
 
@@ -786,39 +800,131 @@ MEMBERSHIP FEE, SURCHARGE, GST, IGST, FOREIGN CURRENCY MARKUP, LATE FEE, FUEL SU
 ## 13. Bank Statement Format Reference
 
 | Bank | Date Format | Amount Format | Section Markers | Special Features |
-|------|------------|---------------|-----------------|------------------|
-| SBI Savings | `DDMMMYYYY` (e.g., `03APR2024`) | Debit/Credit separate columns | TRANSFERFROM, TRANSFERTO prefixes | Multi-row descriptions |
-| SBI Cashback CC | `DD Mon YY` (e.g., `04 Jun 24`) | `1,234.00 D` or `1,234.00 C` | "TRANSACTIONS FOR [name]" | EMI marker `(Pay in EMIs)` |
-| ICICI Amazon Pay CC | `DD/MM/YYYY` | Amount or `Amount CR` | "SPENDS OVERVIEW" section | Reward points column, merchant category keywords |
-| YES BANK KLICK CC | `DD/MM/YYYY` | `Amount Dr` or `Amount Cr` | "Statement Details" section | Explicit merchant category column |
-| AU Zenith+ CC | `DD / MM / YYYY` | `Amount Dr.` or `Amount Cr.` | "Transaction Summary" section | Multi-row for foreign txns |
-| AMEX Platinum Travel | `Month DD` (e.g., `December 1`) | Plain number by section | "domestic transactions" section | Year from statement period |
-| HDFC Swiggy CC | `DD/MM/YYYY` | `Amount` or `Amount Cr` | "Domestic Transactions" section | OCR-required (scanned) |
-| HSBC TravelOne CC | `DDMON` (e.g., `12JAN`) | `Amount` or `Amount CR` | "DATE TRANSACTION DETAILS" section | OCR-required (scanned) |
-| IDFC FIRST Savings | `DD-Mon-YYYY` | Withdrawal/Deposit columns | "STATEMENT OF ACCOUNT" | OCR-required (scanned) |
-| IndusInd Savings | `DD Mon YYYY` | Withdrawal/Deposit/Balance 3-column | "Transaction History" section | OCR-required (scanned) |
+|---|---|---|---|---|
+| SBI Savings | `DDMMMYYYY` | Debit/Credit columns | TRANSFERFROM, TRANSFERTO prefixes | Multi-row narration lines |
+| SBI Cashback CC | `DD Mon YY` | `1,234.00 D` / `C` | "TRANSACTIONS FOR [name]" | EMI marker `(Pay in EMIs)` |
+| ICICI Amazon Pay CC | `DD/MM/YYYY` | Amount or `Amount CR` | "SPENDS OVERVIEW" section | Merchant category keywords |
+| YES BANK KLICK CC | `DD/MM/YYYY` | `Amount Dr` / `Cr` | "Statement Details" section | Merchant category column |
+| AU Zenith+ CC | `DD / MM / YYYY` | `Amount Dr.` / `Cr.` | "Transaction Summary" section | Multi-row foreign currency |
+| AMEX Platinum Travel | `Month DD` | Plain number | "domestic transactions" section | Statement period year resolution |
+| HDFC Swiggy CC | `DD/MM/YYYY` | `Amount` / `Amount Cr` | "Domestic Transactions" section | OCR-required (scanned) |
+| HSBC TravelOne CC | `DDMON` | `Amount` / `Amount CR` | "DATE TRANSACTION DETAILS" section | OCR-required (scanned) |
+| IDFC FIRST Savings | `DD-Mon-YYYY` | Withdrawal/Deposit | "STATEMENT OF ACCOUNT" | OCR-required (scanned) |
+| IndusInd Savings | `DD Mon YYYY` | 3-column table | "Transaction History" section | OCR-required (scanned) |
 
 ---
 
-## 14. Troubleshooting
+## 14. How to Launch (Local Development)
 
-### Backend won't start
-- `sqlite3.OperationalError: unable to open database file`: Ensure write permissions in `backend/` directory
-- `ModuleNotFoundError: No module named 'app'`: Run from `backend/` directory, not project root
-- `tesserocr` import error: Tesseract not installed. Use bundled `local_tesseract/`
-- `TESSDATA_PREFIX` not set: `export TESSDATA_PREFIX=backend/local_tesseract/tessdata`
+### 14.1 Backend (FastAPI)
 
-### OCR fails
-- `[OCR Error: ...]`: Check Tesseract binary is available and eng.traineddata exists
-- `PyTessBaseAPI` initialization error: Check `$TESSDATA_PREFIX` path
-- Slow OCR: Scanned PDFs with many pages take time; reduce render scale in `ocr/engine.py`
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
-### PDF parsing fails
-- "Could not extract any text from this PDF": PDF might be image-based but OCR is unavailable
-- "Could not detect bank format": Add a new parser or the generic parser will catch most formats
-- "No transactions found": Check if parser regex matches the statement format
+#### Run Development Server
+> [!IMPORTANT]
+> When running inside **WSL2 on an NTFS mount (`/mnt/d/...`)**, avoid `uvicorn --reload` because the inotify filesystem watcher fails on DrvFs mounts. Always run directly via `python -m app.main`:
+```bash
+venv/bin/python -m app.main
+```
+The server binds to `0.0.0.0:8000`. Test it with:
+```bash
+curl http://127.0.0.1:8000/
+# Swagger UI available at: http://127.0.0.1:8000/docs
+```
 
-### Flutter web connection issues
-- "Failed to load analysis": Backend not running or wrong URL — check `ApiService.baseUrl`
-- CORS errors: Backend CORS misconfigured — `CORS_ORIGINS=*` for dev
-- WSL2 IP changed: Run `ip addr show eth0` in WSL2 and update base URL
+### 14.2 Frontend (Flutter Web)
+
+```bash
+cd frontend
+flutter pub get
+
+# Launch on Chrome in debug mode
+flutter run -d chrome
+
+# Or launch pointing to a specific backend URL (e.g., cloud backend):
+flutter run -d chrome --dart-define=BACKEND_URL=https://spend-analyzer-ghj9.onrender.com
+```
+
+---
+
+## 15. Testing Guide
+
+The test suite contains **22 automated tests** covering parsing, classification, authentication, and endpoint lifecycles.
+
+### Run All Backend Tests
+```bash
+cd backend
+venv/bin/pytest -v
+```
+
+### Test Suite Breakdown
+
+1. **`tests/test_parsers.py`**:
+   - Tests regex parsers for SBI, SBI Cashback, ICICI, YES Bank, AU Zenith, and AMEX statements.
+2. **`tests/test_classifier.py`**:
+   - Tests mandatory vs. discretionary spend categorization.
+   - Tests fee prioritization (`ANNUAL MEMBERSHIP FEE` must map to `Fees & Charges`, not `Subscriptions`).
+   - Tests newly added categories (Gaming, Lounge, Taxi, Groceries, Dining, Transfers).
+3. **`tests/test_auth.py`**:
+   - Tests user registration, password hashing verification, and JWT login token issuance.
+   - Tests 35-transaction demo data generation and session isolation.
+   - Tests transient / incognito session creation and full session cleanup.
+4. **`tests/test_api.py`**:
+   - Tests `/upload/pdf`, `/upload/batch`, `/upload/manual`, and database reset lifecycle.
+   - Validates multi-file batch upload error handling and aggregate responses.
+
+---
+
+## 16. Cloud Deployment & Hosting Architecture
+
+### Architecture Diagram
+```
+User Browser
+    │
+    ▼
+Netlify Global CDN (https://spend-analyzer.arkaseth.com)
+  [Flutter Web compiled bundle + netlify.toml / _redirects]
+    │
+    │  HTTPS REST API (JWT Bearer / X-Session-ID)
+    ▼
+Render Cloud Service (https://spend-analyzer-ghj9.onrender.com)
+  [Docker Container: Debian + Python 3.12 + Tesseract 5.3.4 + FastAPI]
+    │
+    ▼
+SQLite / Postgres Database (User Isolation & Deduplicated Hashes)
+```
+
+### 16.1 Backend on Render (Docker)
+- **Repo**: Connected to GitHub `arkaseth/spend-analyzer`
+- **Config**: Root directory `backend`, Dockerfile `backend/Dockerfile`
+- **Tesseract OCR**: Pre-packaged in the Docker image via `apt-get install -y tesseract-ocr tesseract-ocr-eng`.
+- **Live URL**: `https://spend-analyzer-ghj9.onrender.com`
+
+### 16.2 Frontend on Netlify
+- **Subdomain**: `spend-analyzer.arkaseth.com`
+- **Build Pipeline**: Configured via `netlify.toml` to automatically download the Flutter SDK, run `flutter build web --release --dart-define=BACKEND_URL=https://spend-analyzer-ghj9.onrender.com`, and publish `frontend/build/web`.
+
+---
+
+## 17. Troubleshooting & FAQ
+
+### Backend won't start: `[Errno 98] Address already in use`
+- A previous process is still bound to port 8000:
+  ```bash
+  fuser -k 8000/tcp
+  ```
+
+### Windows Chrome resolves `localhost` to IPv6 `[::1]`
+- If Chrome fails to connect to `localhost:8000`, use `http://127.0.0.1:8000`. The frontend `ApiService` already defaults to IPv4 `127.0.0.1` on web.
+
+### Scanned PDFs requiring OCR
+- If a scanned image PDF is uploaded on a machine without Tesseract, the API returns a clear 400 error explaining that OCR is required.
+- Install Tesseract on Linux: `sudo apt-get install -y tesseract-ocr tesseract-ocr-eng`. In Docker, it is installed automatically.
+
+### Signed out screen still shows data
+- Signed-out mode enforces **Strict Guest Privacy**. If transactions were previously uploaded prior to enabling authentication, reset the database via the **Upload** tab while signed out to purge legacy unassigned records.
