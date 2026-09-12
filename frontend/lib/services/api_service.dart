@@ -8,13 +8,18 @@ class ApiService {
   static String _authToken = '';
   static String _sessionId = '';
   static bool _isTransient = false;
+  static const String _envBackendUrl = String.fromEnvironment('BACKEND_URL', defaultValue: '');
+  static const String _defaultProdBackendUrl = 'https://spend-analyzer-backend.onrender.com';
 
   static String get baseUrl {
     if (_customBaseUrl.isNotEmpty) return _customBaseUrl;
+    if (_envBackendUrl.isNotEmpty) return _envBackendUrl;
     if (kIsWeb) {
-      var host = Uri.base.host.isNotEmpty ? Uri.base.host : '127.0.0.1';
-      if (host == 'localhost') host = '127.0.0.1';
-      return 'http://$host:8000';
+      final host = Uri.base.host;
+      if (host.isNotEmpty && host != 'localhost' && host != '127.0.0.1') {
+        return _defaultProdBackendUrl;
+      }
+      return 'http://127.0.0.1:8000';
     }
     if (defaultTargetPlatform == TargetPlatform.android) {
       return 'http://10.0.2.2:8000';
