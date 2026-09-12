@@ -1,5 +1,5 @@
 # Redirect API requests to backend host (update backend host URL for production)
-/api/*  https://spend-analyzer-backend.onrender.com/:splat  200
+/api/*  https://spend-analyzer-ghj9.onrender.com/:splat  200
 
 # Flutter SPA routing - fallback all other routes to index.html
 /*  /index.html  200

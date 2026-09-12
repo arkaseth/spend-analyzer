@@ -9,7 +9,7 @@ class ApiService {
   static String _sessionId = '';
   static bool _isTransient = false;
   static const String _envBackendUrl = String.fromEnvironment('BACKEND_URL', defaultValue: '');
-  static const String _defaultProdBackendUrl = 'https://spend-analyzer-backend.onrender.com';
+  static const String _defaultProdBackendUrl = 'https://spend-analyzer-ghj9.onrender.com';
 
   static String get baseUrl {
     if (_customBaseUrl.isNotEmpty) return _customBaseUrl;
